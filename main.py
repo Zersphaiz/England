@@ -1,15 +1,20 @@
 import pandas as pd
+import numpy as np
 from sklearn.preprocessing import LabelEncoder
 from sklearn.model_selection import train_test_split
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import classification_report, confusion_matrix, accuracy_score
 from sklearn.ensemble import RandomForestClassifier
+from xgboost import XGBClassifier
+from sklearn.model_selection import GridSearchCV
+from sklearn.utils.class_weight import compute_class_weight
 
 # Read the files
 df1 = pd.read_csv('England CSV.csv')
 df2 = pd.read_csv('England 2 CSV.csv')
 
 df = pd.concat([df1, df2], ignore_index=True)
+
 
 # print(df.shape)
 # print(df.head())
@@ -69,7 +74,7 @@ df.dropna(axis=0, how='any', inplace=True)
 
 
 # Train & Test
-x= df.drop('Match_Result', axis=1)
+x = df.drop('Match_Result', axis=1)
 y = df['Match_Result']
 
 x_train, x_test, y_train, y_test = train_test_split(x, y, test_size=0.2, random_state=42)
@@ -78,13 +83,13 @@ x_train, x_test, y_train, y_test = train_test_split(x, y, test_size=0.2, random_
 # Logistic Regression
 # ---------------------------------------------
 
-model = LogisticRegression(max_iter=1000, class_weight='balanced') # Modeli oluştur
-model.fit(x_train, y_train) # Eğit
+model = LogisticRegression(max_iter=1000, class_weight='balanced')  # Modeli oluştur
+model.fit(x_train, y_train)  # Eğit
 
-y_pred_lr = model.predict(x_test) # Tahmin yap
+y_pred_lr = model.predict(x_test)  # Tahmin yap
 
 # Başarıyı ölç
-print("LR Accuracy:", accuracy_score(y_test, y_pred_lr))
+print("\nLR Accuracy:", accuracy_score(y_test, y_pred_lr))
 print("\nLR Classification Report:\n", classification_report(y_test, y_pred_lr))
 print("\nLR Confusion Matrix:\n", confusion_matrix(y_test, y_pred_lr))
 
@@ -97,7 +102,7 @@ print(y.value_counts())
 # Random Forest Classifier
 # ---------------------------------------------
 
-rf_model= RandomForestClassifier(
+rf_model = RandomForestClassifier(
     n_estimators=200,
     max_depth=20,
     min_samples_split=10,
@@ -108,6 +113,75 @@ rf_model= RandomForestClassifier(
 rf_model.fit(x_train, y_train)
 y_pred_rf = rf_model.predict(x_test)
 
-print("RF Accuracy:", accuracy_score(y_test, y_pred_rf))
+print("\nRF Accuracy:", accuracy_score(y_test, y_pred_rf))
 print("\nRF Classification Report:\n", classification_report(y_test, y_pred_rf))
 print("\nRF Confusion Matrix:\n", confusion_matrix(y_test, y_pred_rf))
+
+# ---------------------------------------------
+# XGBoost
+# ---------------------------------------------
+
+xgb_model = XGBClassifier(learning_rate=0.05,
+                          n_estimators=500,
+                          max_depth=6,
+                          subsample=0.8,
+                          colsample_bytree=0.8,
+                          random_state=42,
+                          n_jobs=-1,
+                          eval_metric='mlogloss')
+xgb_model.fit(x_train, y_train)
+
+# Tahmin
+y_pred_xgb = xgb_model.predict(x_test)
+
+# Performans
+print("\nXGBoost Accuracy:", accuracy_score(y_test, y_pred_xgb))
+print("\nXGBoost Classification Report:\n", classification_report(y_test, y_pred_xgb))
+print("\nXGBoost Confusion Matrix:\n", confusion_matrix(y_test, y_pred_xgb))
+
+# Modelin temel hali
+xgb_base = XGBClassifier(
+    objective='multi:softmax',
+    num_class=3,
+    eval_metric='mlogloss',
+    n_jobs=-1,
+    random_state=42
+)
+
+# Test edilecek parametre kombinasyonları
+param_grid = {
+    'max_depth': [3, 5, 7],
+    'min_child_weight': [1, 3, 5],
+    'subsample': [0.8, 1.0],
+    'colsample_bytree': [0.8, 1.0]
+}
+
+# Grid Search başlat
+grid_search = GridSearchCV(
+    estimator=xgb_base,
+    param_grid=param_grid,
+    scoring='balanced_accuracy',
+    cv=3,
+    verbose=1
+)
+
+# Ağırlık hesapla
+class_weights = compute_class_weight(class_weight='balanced', classes=np.unique(y_train), y=y_train)
+weight_dict = dict(zip(np.unique(y_train), class_weights))
+sample_weights = y_train.map(weight_dict)
+
+# GridSearchCV’e sample_weight geçmek için parametre hazırlığı
+fit_params = {"sample_weight": sample_weights}
+
+grid_search.fit(x_train, y_train, **fit_params)
+
+print("En iyi parametreler:", grid_search.best_params_)
+print("En iyi doğruluk (train):", grid_search.best_score_)
+
+# En iyi modelle test verisi üzerinde değerlendirme
+best_model = grid_search.best_estimator_
+y_pred_best = best_model.predict(x_test)
+
+print("XGBoost (GridSearch sonrası) Test Doğruluğu:", accuracy_score(y_test, y_pred_best))
+print("\nClassification Report:\n", classification_report(y_test, y_pred_best))
+print("\nConfusion Matrix:\n", confusion_matrix(y_test, y_pred_best))
