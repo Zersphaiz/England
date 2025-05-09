@@ -3,11 +3,15 @@ import numpy as np
 from sklearn.preprocessing import LabelEncoder
 from sklearn.model_selection import train_test_split
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import classification_report, confusion_matrix, accuracy_score
+from sklearn.metrics import classification_report, confusion_matrix, accuracy_score, f1_score
 from sklearn.ensemble import RandomForestClassifier
 from xgboost import XGBClassifier
 from sklearn.model_selection import GridSearchCV
 from sklearn.utils.class_weight import compute_class_weight
+from sklearn.model_selection import RandomizedSearchCV
+from imblearn.over_sampling import SMOTE
+from lightgbm import LGBMClassifier
+from catboost import CatBoostClassifier
 
 # Read the files
 df1 = pd.read_csv('England CSV.csv')
@@ -121,67 +125,56 @@ print("\nRF Confusion Matrix:\n", confusion_matrix(y_test, y_pred_rf))
 # XGBoost
 # ---------------------------------------------
 
-xgb_model = XGBClassifier(learning_rate=0.05,
-                          n_estimators=500,
-                          max_depth=6,
-                          subsample=0.8,
-                          colsample_bytree=0.8,
-                          random_state=42,
-                          n_jobs=-1,
-                          eval_metric='mlogloss')
-xgb_model.fit(x_train, y_train)
+smote = SMOTE(random_state=42)
+x_train_sm, y_train_sm = smote.fit_resample(x_train, y_train)
 
-# Tahmin
-y_pred_xgb = xgb_model.predict(x_test)
+# 2) Modelleri tanımla
+models = {
+    'XGBoost': XGBClassifier(
+        objective='multi:softmax', num_class=3, eval_metric='mlogloss',
+        learning_rate=0.1, max_depth=5, n_estimators=500,
+        subsample=0.8, colsample_bytree=1.0,
+        n_jobs=-1, random_state=42
+    ),
+    'LightGBM': LGBMClassifier(
+        learning_rate=0.05,
+        n_estimators=500,
+        max_depth=5,
+        subsample=0.8,
+        colsample_bytree=1.0,
 
-# Performans
-print("\nXGBoost Accuracy:", accuracy_score(y_test, y_pred_xgb))
-print("\nXGBoost Classification Report:\n", classification_report(y_test, y_pred_xgb))
-print("\nXGBoost Confusion Matrix:\n", confusion_matrix(y_test, y_pred_xgb))
+        # yeni ekleyeceğiniz parametreler
+        min_split_gain=0.1,  # split yapmanın minimum kazancı
+        min_child_samples=20,  # bir yaprakta kalabilmesi için gereken minimum örnek sayısı
 
-# Modelin temel hali
-xgb_base = XGBClassifier(
-    objective='multi:softmax',
-    num_class=3,
-    eval_metric='mlogloss',
-    n_jobs=-1,
-    random_state=42
-)
+        # log bastırmamak için
+        verbose=-1,
 
-# Test edilecek parametre kombinasyonları
-param_grid = {
-    'max_depth': [3, 5, 7],
-    'min_child_weight': [1, 3, 5],
-    'subsample': [0.8, 1.0],
-    'colsample_bytree': [0.8, 1.0]
+        # paralel çalıştırma
+        n_jobs=-1,
+        random_state=42
+    ),
+    'CatBoost': CatBoostClassifier(
+        iterations=500,
+        learning_rate=0.1,
+        depth=5,
+        random_state=42,
+
+        logging_level='Silent'
+    )
 }
 
-# Grid Search başlat
-grid_search = GridSearchCV(
-    estimator=xgb_base,
-    param_grid=param_grid,
-    scoring='balanced_accuracy',
-    cv=3,
-    verbose=1
-)
+# 3) Eğit & değerlendir
+results = {}
+for name, model in models.items():
+    model.fit(x_train_sm, y_train_sm)
+    y_pred = model.predict(x_test)
+    acc = accuracy_score(y_test, y_pred)
+    f1 = f1_score(y_test, y_pred, average='macro')
+    results[name] = (acc, f1)
 
-# Ağırlık hesapla
-class_weights = compute_class_weight(class_weight='balanced', classes=np.unique(y_train), y=y_train)
-weight_dict = dict(zip(np.unique(y_train), class_weights))
-sample_weights = y_train.map(weight_dict)
-
-# GridSearchCV’e sample_weight geçmek için parametre hazırlığı
-fit_params = {"sample_weight": sample_weights}
-
-grid_search.fit(x_train, y_train, **fit_params)
-
-print("En iyi parametreler:", grid_search.best_params_)
-print("En iyi doğruluk (train):", grid_search.best_score_)
-
-# En iyi modelle test verisi üzerinde değerlendirme
-best_model = grid_search.best_estimator_
-y_pred_best = best_model.predict(x_test)
-
-print("XGBoost (GridSearch sonrası) Test Doğruluğu:", accuracy_score(y_test, y_pred_best))
-print("\nClassification Report:\n", classification_report(y_test, y_pred_best))
-print("\nConfusion Matrix:\n", confusion_matrix(y_test, y_pred_best))
+# 4) Karşılaştır
+for name, (acc, f1) in results.items():
+    print(f"{name:8s} — Accuracy: {acc:.3f}, F1-macro: {f1:.3f}")
+    print(classification_report(y_test, models[name].predict(x_test)))
+    print("Confusion Matrix:\n", confusion_matrix(y_test, models[name].predict(x_test)), "\n")
