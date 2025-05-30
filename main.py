@@ -193,9 +193,7 @@ def run_ensemble(x_train, y_train, x_test, y_test):
 
     # --- 3) Eğit ve Tahmin ---
 
-    # Eğer SMOTE ile dengelenmiş veriniz varsa:
     X_train_fit, y_train_fit = x_train_sm, y_train_sm
-    # Yoksa normal:
     #   X_train_fit, y_train_fit = x_train, y_train
 
     ensemble.fit(X_train_fit, y_train_fit)
@@ -215,7 +213,6 @@ def run_two_stage(x_train, y_train, x_test, y_test, recall_target=0.30):
     y_train_draw = (y_train == 0).astype(int)
     y_test_draw = (y_test == 0).astype(int)
 
-    # SMOTE burada da kullanabiliriz
     sm = SMOTE(random_state=42)
     X_tr_draw, y_tr_draw = sm.fit_resample(x_train, y_train_draw)
 
@@ -365,7 +362,7 @@ def run_xgb_grid_and_threshold(x_train, y_train, x_test, y_test):
 
 
 # final_xgb = XGBClassifier(
-#     objective='multi:softprob',  # softmax yerine softprob, çünkü predict_proba kullanacağız
+#     objective='multi:softprob',  # softmax yerine softprob çünkü predict_proba kullanılacak
 #     num_class=3,
 #     eval_metric='mlogloss',
 #     learning_rate=0.1,
@@ -381,7 +378,7 @@ def run_xgb_grid_and_threshold(x_train, y_train, x_test, y_test):
 # # Tahmin olasılıklarını al
 # y_proba = final_xgb.predict_proba(x_test)
 #
-# # Örneğin 3 sınıf için özel eşikler (bunlar örnek değerlerdir, deneyerek ayarlayacağız)
+# # Örneğin 3 sınıf için özel eşikler (bunlar örnek değerlerdir, deneyerek ayarlanacak)
 # thresholds = [0.3, 0.4, 0.3]  # [class_0, class_1, class_2]
 #
 # # Olasılıkları eşiklere göre değerlendirerek sınıf seç
@@ -461,16 +458,16 @@ def run_xgb_grid_and_threshold(x_train, y_train, x_test, y_test):
 # else:
 #     thr0 = thresholds[np.argmax(recalls)]
 #
-# # --- (4) Diğer sınıflar için de eşik belirleyin (isterseniz eşit dağılım da yapabilirsiniz)
+# # --- (4) Diğer sınıflar için de eşik belirle
 # best_thresh = {
 #     0: thr0,
-#     1: 1/3,   # ya da önceki grid ile bulunmuş eşiklerinizden biri
+#     1: 1/3,
 #     2: 1/3
 # }
 #
 # print("Seçilen eşikler (class=0 için recall>=0.30):", best_thresh)
 #
-# # --- (5) Tahmin fonksiyonunuz
+# # --- (5) Tahmin fonksiyonu
 # def predict_with_thresholds(proba, thr_dict):
 #     preds = []
 #     for p in proba:
@@ -561,7 +558,6 @@ def run_mlp(x_train_sm, y_train_sm, x_test, y_test, recall_target=0.30):
     print("MLP Confusion Matrix:\n", confusion_matrix(y_test, y_pred_mlp))
 
     # --- B) class=0 için en iyi eşik değerini precision‐recall eğrisi üzerinden bul ---
-    from sklearn.metrics import precision_recall_curve, recall_score
 
     probs0 = mlp.predict_proba(x_test)[:, 0]
     prec, rec, thr = precision_recall_curve((y_test == 0).astype(int), probs0)
@@ -623,11 +619,11 @@ def run_svm_all(x_train_sm, y_train_sm, x_train, y_train, x_test, y_test):
     svm = Pipeline([
         ('scaler', StandardScaler()),
         ('svc', SVC(
-            C=1.0,  # varsayılan değer
+            C=1.0,
             kernel='rbf',
             gamma='scale',
             class_weight='balanced',
-            probability=False,  # predict_proba ihtiyacın yoksa False yap
+            probability=False,
             random_state=42
         ))
     ])
@@ -650,7 +646,7 @@ def run_svm_all(x_train_sm, y_train_sm, x_train, y_train, x_test, y_test):
         ('svc', SVC(
             kernel='rbf',
             class_weight='balanced',
-            probability=False,  # proba gerek yoksa False
+            probability=False,
             random_state=42
         ))
     ])
@@ -665,7 +661,7 @@ def run_svm_all(x_train_sm, y_train_sm, x_train, y_train, x_test, y_test):
     rand_svm = RandomizedSearchCV(
         estimator=svm_pipe,
         param_distributions=param_dist,
-        n_iter=6,  # çok ağır olmasın
+        n_iter=6,
         scoring='f1_macro',
         cv=3,
         n_jobs=-1,
@@ -756,9 +752,10 @@ x_train_sm, y_train_sm = sm.fit_resample(x_train, y_train)
 # Run
 lr_model = run_logistic(x_train, y_train, x_test, y_test)
 rf_model = run_random_forest(x_train, y_train, x_test, y_test)
-ensemble_model = run_two_stage(x_train, y_train, x_test, y_test)
+ensemble_model = run_ensemble(x_train, y_train, x_test, y_test)
 clf_draw, clf_nd = run_two_stage(x_train, y_train, x_test, y_test)
-best_xgb_model, xgb_threshold = run_xgb_grid_and_threshold(x_train, y_train, x_test, y_test)
+best_xgb_acc, xgb_threshold = run_xgb_grid_and_threshold(x_train, y_train, x_test, y_test)
 best_knn_model = run_knn(x_train, y_train, x_test, y_test)
 mlp_model = run_mlp(x_train_sm, y_train_sm, x_test, y_test)
-svm_model, svm_pipe, rand_svm, svm_cal, final_preds = run_svm_all(x_train, y_train, x_train_sm, y_train_sm, x_test, y_test)
+svm_model, svm_pipe, rand_svm, svm_cal, final_preds = run_svm_all(x_train, y_train, x_train_sm, y_train_sm, x_test,
+                                                                  y_test)
